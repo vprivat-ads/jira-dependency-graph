@@ -239,7 +239,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-u', '--user', dest='user', default=None, help='Username to access JIRA')
     parser.add_argument('-p', '--password', dest='password', default=None, help='Password to access JIRA')
-    parser.add_argument('-c', '--cookie', dest='cookie', default=None, help='JSESSIONID session cookie value')
+    parser.add_argument('-c', '--cookie', dest='cookie', default=None, help='Cookie session cookie value')
     parser.add_argument('-b', '--bearer', dest='bearer', default=None, help='Bearer Token (Personal Access Token)')
     parser.add_argument('-N', '--no-auth', dest='no_auth', action='store_true', default=False, help='Use no authentication')
     parser.add_argument('-j', '--jira', dest='jira_url', default='http://jira.example.com', help='JIRA Base URL (with protocol)')
@@ -279,7 +279,7 @@ def main():
         auth = {'Authorization': 'Bearer ' + options.bearer}
     elif options.cookie is not None:
         # Log in with browser and use --cookie=ABCDEF012345 commandline argument
-        auth = {'JSESSIONID': options.cookie}
+        auth = {'Cookie': options.cookie}
     elif options.no_auth is True:
         # Don't use authentication when it's not needed
         auth = None
