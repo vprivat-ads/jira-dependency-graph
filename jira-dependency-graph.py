@@ -11,8 +11,8 @@ import requests
 from functools import reduce
 
 GOOGLE_CHART_URL = 'https://chart.apis.google.com/chart'
-MAX_SUMMARY_LENGTH = 30
-
+MAX_SUMMARY_LENGTH = 40
+CLOSED_STATUSES = ['Closed', 'Done']
 
 def log(*args):
     print(*args, file=sys.stderr)
@@ -59,7 +59,7 @@ class JiraSearch(object):
 
     def list_ids(self, query):
         log('Querying ' + query)
-        response = self.get('/search', params={'jql': query, 'fields': 'key', 'maxResults': 100})
+        response = self.get('/search', params={'jql': query, 'fields': 'key', 'maxResults': 1000})
         return [issue["key"] for issue in response.json()["issues"]]
 
     def get_issue_uri(self, issue_key):
@@ -67,7 +67,7 @@ class JiraSearch(object):
 
 
 def build_graph_data(start_issue_key, jira, excludes, ignores, show_directions, directions, includes, issue_excludes,
-                     ignore_closed, ignore_epic, ignore_subtasks, traverse, word_wrap):
+                     ignore_closed, ignore_epic, ignore_subtasks, traverse, word_wrap, filters):
     """ Given a starting image key and the issue-fetching function build up the GraphViz data representing relationships
         between issues. This will consider both subtasks and issue links.
     """
@@ -122,14 +122,17 @@ def build_graph_data(start_issue_key, jira, excludes, ignores, show_directions, 
         link_type = link['type'][direction]
 
         if ignore_closed:
-            if ('inwardIssue' in link) and (link['inwardIssue']['fields']['status']['name'] in 'Closed'):
+            if ('inwardIssue' in link) and (link['inwardIssue']['fields']['status']['name'] in CLOSED_STATUSES):
                 log('Skipping ' + linked_issue_key + ' - linked key is Closed')
                 return
-            if ('outwardIssue' in link) and (link['outwardIssue']['fields']['status']['name'] in 'Closed'):
+            if ('outwardIssue' in link) and (link['outwardIssue']['fields']['status']['name'] in CLOSED_STATUSES):
                 log('Skipping ' + linked_issue_key + ' - linked key is Closed')
                 return
 
         if includes not in linked_issue_key:
+            return
+
+        if filters is not None and linked_issue_key not in filters:
             return
 
         if link_type.strip() in ignores:
@@ -164,7 +167,7 @@ def build_graph_data(start_issue_key, jira, excludes, ignores, show_directions, 
         fields = issue['fields']
         seen.append(issue_key)
 
-        if ignore_closed and (fields['status']['name'] in 'Closed'):
+        if ignore_closed and (fields['status']['name'] in CLOSED_STATUSES):
             log('Skipping ' + issue_key + ' - it is Closed')
             return graph
 
@@ -179,12 +182,13 @@ def build_graph_data(start_issue_key, jira, excludes, ignores, show_directions, 
                 issues = jira.query('"Epic Link" = "%s"' % issue_key)
                 for subtask in issues:
                     subtask_key = get_key(subtask)
-                    log(subtask_key + ' => references epic => ' + issue_key)
-                    node = '{}->{}[color=orange]'.format(
-                        create_node_text(issue_key, fields),
-                        create_node_text(subtask_key, subtask['fields']))
-                    graph.append(node)
-                    children.append(subtask_key)
+                    if filters is None or subtask_key in filters:
+                        log(subtask_key + ' => references epic => ' + issue_key)
+                        node = '{}->{}[color=orange]'.format(
+                            create_node_text(issue_key, fields),
+                            create_node_text(subtask_key, subtask['fields']))
+                        graph.append(node)
+                        children.append(subtask_key)
             if 'subtasks' in fields and not ignore_subtasks:
                 for subtask in fields['subtasks']:
                     subtask_key = get_key(subtask)
@@ -254,6 +258,7 @@ def parse_args():
     parser.add_argument('-s', '--show-directions', dest='show_directions', default=['inward', 'outward'], help='which directions to show (inward, outward)')
     parser.add_argument('-d', '--directions', dest='directions', default=['inward', 'outward'], help='which directions to walk (inward, outward)')
     parser.add_argument('--jql', dest='jql_query', default=None, help='JQL search for issues (e.g. \'project = JRADEV\')')
+    parser.add_argument('--jqlf', dest='jql_query_filters', default=None, help='JQL search for issues to filter (e.g. \'fixVersion = 0.2\')')
     parser.add_argument('-ns', '--node-shape', dest='node_shape', default='box', help='which shape to use for nodes (circle, box, ellipse, etc)')
     parser.add_argument('-t', '--ignore-subtasks', action='store_true', default=False, help='Don''t include sub-tasks issues')
     parser.add_argument('-T', '--dont-traverse', dest='traverse', action='store_false', default=True, help='Do not traverse to other projects')
@@ -296,11 +301,17 @@ def main():
     if options.jql_query is not None:
         options.issues.extend(jira.list_ids(options.jql_query))
 
+    if options.jql_query_filters is not None:
+        filters = []
+        filters.extend(jira.list_ids(options.jql_query_filters))
+    else:
+        filters = None
+
     graph = []
     for issue in options.issues:
         graph = graph + build_graph_data(issue, jira, options.excludes, options.ignores, options.show_directions, options.directions,
                                          options.includes, options.issue_excludes, options.closed, options.ignore_epic,
-                                         options.ignore_subtasks, options.traverse, options.word_wrap)
+                                         options.ignore_subtasks, options.traverse, options.word_wrap, filters)
 
     if options.local:
         print_graph(filter_duplicates(graph), options.node_shape)
